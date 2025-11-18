@@ -1,5 +1,11 @@
 # ClimateActionPolicy-RAG-Application
 
+## Live Demo
+
+You can try the **Climate Policy RAG System** here:
+
+ **Live App:** https://cap-rag.streamlit.app/
+
 ## Overview
 
 ClimateActionPolicy-RAG-Application is a project designed to support climate action policy recommendations using a Retrieval-Augmented Generation (RAG) system. The application leverages a retrieval component to fetch relevant documents and a generative model to create contextually enriched responses based on the retrieved documents.
