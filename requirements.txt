@@ -1,9 +1,12 @@
 streamlit
 langchain
 langchain_community
+langchain-openai
+openai
 chromadb
 transformers
 torch
 pandas
 langchain_chroma
 sentence_transformers
+langchain_ollama

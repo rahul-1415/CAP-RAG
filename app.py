@@ -1,6 +1,14 @@
+from pathlib import Path
+
 import streamlit as st
+from dotenv import load_dotenv
+
+from components.generator import create_context_from_docs, generate_answer
 from components.retriever import initialize_retriever
-from components.generator import create_context_from_docs, generate_with_ollama3
+
+# Explicitly point to .env file in the project root
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 # Initialize session state variables for chat history if they don't exist
 if "all_chats" not in st.session_state:
@@ -28,6 +36,16 @@ with col1:
 
 with col2:
     st.title("Climate Policy RAG System")
+
+    model_choice = st.radio(
+        "Choose a model",
+        options=[
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+        ],
+        index=0,
+        horizontal=True,
+    )
 
     # Display chat history
     for chat in st.session_state.current_chat:
@@ -62,7 +80,7 @@ with col2:
         context = create_context_from_docs(retrieved_docs)
 
         # Generate answer
-        answer = generate_with_ollama3(context, prompt)
+        answer = generate_answer(context, prompt, model_choice)
 
         # Update chat history
         st.session_state.current_chat.append({"role": "user", "content": prompt})

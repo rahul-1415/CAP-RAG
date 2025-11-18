@@ -49,6 +49,21 @@ ClimateActionPolicy-RAG-Application is a project designed to support climate act
     ```
     Open your web browser and navigate to `http://localhost:8501`.
 
+### Configure Groq API
+
+The app now uses Groq’s OpenAI-compatible endpoint with Llama 3 models. Set these environment variables before running:
+
+- `GROQ_API_KEY` – your Groq API key (required).
+- `GROQ_API_BASE_URL` – optional override (defaults to `https://api.groq.com/openai/v1`).
+- `MAX_CONTEXT_CHARS` – optional cap on context size to avoid token limits (default: 15000 chars).
+
+How to get a Groq API key:
+1. Sign up or log in at [https://console.groq.com](https://console.groq.com).
+2. Go to **API Keys** and click **Create API Key**.
+3. Copy the key and store it securely (e.g., add to `.env`: `GROQ_API_KEY="gsk_..."`).
+
+In the UI you can choose between `llama-3.3-70b-versatile` (default) and `llama-3.1-8b-instant`. If you hit token-per-minute limits, lower the context size, use the 8B instant model, or set `MAX_CONTEXT_CHARS` to a smaller value.
+
 ## Dependencies
 
 The following Python packages are required to run the application:
