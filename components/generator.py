@@ -1,5 +1,6 @@
 # components/generator.py
 import os
+from functools import lru_cache
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -24,21 +25,36 @@ def _get_api_config():
     return api_key, base_url
 
 
-def generate_answer(context, question, model_name):
-    """Generate an answer using the chosen Groq (OpenAI-compatible) chat model."""
+@lru_cache(maxsize=4)
+def _get_llm(model_name):
     api_key, base_url = _get_api_config()
-
-    llm = ChatOpenAI(
+    return ChatOpenAI(
         model=model_name,
         api_key=api_key,
         base_url=base_url,
-        temperature=0.3,
+        temperature=0.1,
     )
 
+
+def generate_answer(context, question, model_name):
+    """Generate an answer using the chosen Groq (OpenAI-compatible) chat model."""
+    llm = _get_llm(model_name)
+
     messages = [
-        SystemMessage(content="Answer the question using only the provided context."),
+        SystemMessage(
+            content=(
+                "You are a policy assistant. Answer using only the provided context. "
+                "If the context is insufficient, say exactly what is missing."
+            )
+        ),
         HumanMessage(content=f"Context: {context}\n\nQuestion: {question}"),
     ]
 
-    response = llm.invoke(messages)
-    return response.content
+    try:
+        response = llm.invoke(messages)
+        return response.content
+    except Exception as exc:
+        return (
+            "I could not generate a response right now due to an upstream model error. "
+            f"Details: {exc}"
+        )

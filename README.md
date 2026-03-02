@@ -13,6 +13,7 @@ ClimateActionPolicy-RAG-Application is a project designed to support climate act
 ## Features
 
 - **Streamlit Interface**: Provides an interactive web interface for querying and displaying responses.
+- **Project Pages**: Includes dedicated "About This Project" and "How It Works" pages with workflow and use-case guidance.
 - **Document Retrieval**: Utilizes a retriever to fetch relevant documents based on user queries.
 - **Contextual Response Generation**: Generates responses using the Ollama LLaMA 3 model, enriched with context from retrieved documents.
 - **Chat History Management**: Supports managing multiple chat sessions and maintaining chat histories.
@@ -82,7 +83,7 @@ The following Python packages are required to run the application:
 - torch
 - pandas
 - langchain_chroma
-- sentence_transformers
+- sentence-transformers
 
 Install the required packages using pip:
 
