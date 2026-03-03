@@ -23,6 +23,7 @@ st.markdown(
     """
 This project helps users ask climate policy questions and get grounded, context-aware answers.
 The assistant retrieves relevant policy passages first, then generates an answer constrained to that context.
+Users can control retrieval depth from the chat page using **Documents to check** (default: `5`).
 """
 )
 
@@ -41,7 +42,8 @@ st.markdown(
 1. Automated data collection and preparation pipeline for C40 policy articles.
 2. A retrieval layer using Chroma vector storage and sentence embeddings.
 3. A generation layer using Groq-hosted Llama models.
-4. A Streamlit app for query input, evidence viewing, and answer generation.
+4. A Streamlit app for query input, evidence viewing, answer generation, and multi-chat history.
+5. A retrieval depth selector (`Documents to check`) so users can tune breadth vs speed per query.
 """
 )
 
@@ -50,6 +52,7 @@ st.markdown(
     """
 - Designed for lightweight web deployment with a persistent Chroma directory.
 - Caching is used to reduce repeated retriever/model initialization costs.
+- Higher document counts can improve coverage but may increase retrieval and generation time.
 - Restart spikes are usually caused by limited instance resources or cold starts.
 """
 )

@@ -111,6 +111,9 @@ def _init_session_state():
     if "model_choice" not in st.session_state:
         st.session_state.model_choice = "llama-3.3-70b-versatile"
 
+    if "retrieval_k" not in st.session_state:
+        st.session_state.retrieval_k = 5
+
     if "chats" not in st.session_state:
         chats = _migrate_legacy_state()
         if not chats:
@@ -169,7 +172,16 @@ def _process_prompt(prompt, model_name):
     try:
         with st.spinner("Retrieving policy context..."):
             retriever = get_retriever()
-            retrieved_docs = retriever.invoke(prompt)
+            selected_k = int(st.session_state.get("retrieval_k", 5))
+            base_search_kwargs = dict(getattr(retriever, "search_kwargs", {}) or {})
+            base_search_kwargs["k"] = selected_k
+            base_search_kwargs["fetch_k"] = max(int(base_search_kwargs.get("fetch_k", 20)), selected_k)
+
+            query_retriever = retriever.vectorstore.as_retriever(
+                search_type=getattr(retriever, "search_type", "mmr"),
+                search_kwargs=base_search_kwargs,
+            )
+            retrieved_docs = query_retriever.invoke(prompt)
     except Exception as exc:
         active_chat["latest_docs"] = []
         active_chat["messages"].append({"role": "assistant", "content": f"Retriever failed: {exc}"})
@@ -206,7 +218,7 @@ with col1:
         st.title("Chats")
         st.button("New Chat", on_click=create_new_chat, use_container_width=True, type="primary")
         st.markdown(
-            '<p class="chat-caption">Default names use chat order. You can rename any active chat.</p>',
+            '<h3 class="chat-caption" style="text-align:center; color:#111; font-weight:bold;">Chat History</h3>',
             unsafe_allow_html=True,
         )
 
@@ -239,7 +251,7 @@ with col1:
 with col2:
     active_chat = _get_active_chat()
 
-    header_col1, header_col2 = st.columns([2.1, 1.4], gap="medium")
+    header_col1, header_col2, header_col3 = st.columns([2.1, 1.2, 0.9], gap="medium")
     with header_col1:
         st.title("Climate Policy RAG Assistant")
         st.caption("Ask policy questions grounded in the C40 Knowledge Hub dataset.")
@@ -250,7 +262,16 @@ with col2:
             key="model_choice",
             horizontal=True,
         )
-    st.markdown(f"**Current chat:** `{active_chat['title']}`")
+    with header_col3:
+        st.number_input(
+            "Documents to check",
+            min_value=1,
+            max_value=20,
+            step=1,
+            key="retrieval_k",
+            help="Controls how many policy chunks are retrieved per question.",
+        )
+    st.write(f"**Current chat: {active_chat['title']}**")
     metric_col1, metric_col2, metric_col3 = st.columns(3)
     metric_col1.metric("Chats", str(len(st.session_state.chats)))
     metric_col2.metric("Replies", str(_assistant_reply_count(active_chat)))
@@ -270,9 +291,6 @@ with col2:
             st.markdown(
                 """
 Try prompts like:
-- "How can a city decarbonise urban freight quickly?"
-- "What are practical steps for climate budgeting in city government?"
-- "Which actions improve air quality and reduce emissions together?"
 """
             )
             _render_quick_prompts(active_chat)

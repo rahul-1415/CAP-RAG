@@ -15,7 +15,8 @@ ClimateActionPolicy-RAG-Application is a project designed to support climate act
 - **Streamlit Interface**: Provides an interactive web interface for querying and displaying responses.
 - **Project Pages**: Includes dedicated "About This Project" and "How It Works" pages with workflow and use-case guidance.
 - **Document Retrieval**: Utilizes a retriever to fetch relevant documents based on user queries.
-- **Contextual Response Generation**: Generates responses using the Ollama LLaMA 3 model, enriched with context from retrieved documents.
+- **Retrieval Depth Control**: Lets users choose how many documents to retrieve per query (`1-20`, default `5`).
+- **Contextual Response Generation**: Generates responses using Groq-hosted Llama models, enriched with retrieved context.
 - **Chat History Management**: Supports managing multiple chat sessions and maintaining chat histories.
 
 ## Files
