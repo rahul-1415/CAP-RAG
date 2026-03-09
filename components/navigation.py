@@ -47,7 +47,6 @@ def _render_sidebar(active_page: str) -> None:
 def render_top_nav(active_page: str) -> None:
     _render_sidebar(active_page)
 
-    st.markdown('<div class="menu-bar-title">Menu Bar</div>', unsafe_allow_html=True)
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
