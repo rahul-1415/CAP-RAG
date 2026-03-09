@@ -2,9 +2,6 @@
 import os
 from functools import lru_cache
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-
 
 def create_context_from_docs(docs):
     """
@@ -27,6 +24,8 @@ def _get_api_config():
 
 @lru_cache(maxsize=4)
 def _get_llm(model_name):
+    from langchain_openai import ChatOpenAI
+
     api_key, base_url = _get_api_config()
     return ChatOpenAI(
         model=model_name,
@@ -38,6 +37,8 @@ def _get_llm(model_name):
 
 def generate_answer(context, question, model_name):
     """Generate an answer using the chosen Groq (OpenAI-compatible) chat model."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
     llm = _get_llm(model_name)
 
     messages = [
@@ -58,3 +59,16 @@ def generate_answer(context, question, model_name):
             "I could not generate a response right now due to an upstream model error. "
             f"Details: {exc}"
         )
+
+
+def run_refinement(model_name, system_prompt, user_prompt):
+    """Run a constrained rewrite/refinement prompt with the selected model."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    llm = _get_llm(model_name)
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+    response = llm.invoke(messages)
+    return response.content

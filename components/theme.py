@@ -52,31 +52,33 @@ def apply_theme_styles() -> None:
 
     if dark_mode:
         tokens = {
-            "bg_main": "#0c1418",
-            "bg_accent": "#123844",
-            "surface_1": "#122127",
-            "surface_2": "#1a2d35",
-            "text_main": "#e9f5f7",
-            "text_muted": "#abc2ca",
-            "border": "#35515c",
-            "accent": "#4ec9a4",
+            "bg_main": "#0b1318",
+            "bg_accent": "#0f3342",
+            "surface_1": "#132129",
+            "surface_2": "#1c2f39",
+            "text_main": "#e7f1f6",
+            "text_muted": "#a7bcc7",
+            "border": "#304a56",
+            "accent": "#35b68f",
             "shadow": "rgba(0, 0, 0, 0.35)",
-            "metric_text": "#e9f5f7",
-            "toggle_knob": "#e9f5f7",
+            "metric_text": "#e7f1f6",
+            "toggle_knob": "#e7f1f6",
+            "toggle_border": "#304a56",
         }
     else:
         tokens = {
-            "bg_main": "#eaf2ef",
-            "bg_accent": "#bfded2",
+            "bg_main": "#f3f6f9",
+            "bg_accent": "#d9e6ef",
             "surface_1": "#ffffff",
-            "surface_2": "#e4efea",
-            "text_main": "#10212a",
-            "text_muted": "#38505c",
-            "border": "#000000",
-            "accent": "#0a7a5d",
-            "shadow": "rgba(20, 45, 56, 0.10)",
-            "metric_text": "#000000",
-            "toggle_knob": "#000000",
+            "surface_2": "#edf2f7",
+            "text_main": "#111827",
+            "text_muted": "#425466",
+            "border": "#111827",
+            "accent": "#0f766e",
+            "shadow": "rgba(17, 24, 39, 0.10)",
+            "metric_text": "#111827",
+            "toggle_knob": "#111827",
+            "toggle_border": "#000000",
         }
 
     st.markdown(
@@ -96,6 +98,7 @@ def apply_theme_styles() -> None:
             --shadow: {tokens["shadow"]};
             --metric-text: {tokens["metric_text"]};
             --toggle-knob: {tokens["toggle_knob"]};
+            --toggle-border: {tokens["toggle_border"]};
         }}
 
         [data-testid="stAppViewContainer"] {{
@@ -111,8 +114,19 @@ def apply_theme_styles() -> None:
         .block-container {{
             padding-top: 4.2rem;
             padding-bottom: 1.2rem;
-            max-width: 1380px;
+            padding-left: 1.2rem;
+            padding-right: 1.2rem;
+            max-width: 100% !important;
             animation: fadeIn 220ms ease;
+        }}
+
+        [data-testid="stSidebar"] {{
+            background: var(--surface-1);
+            border-right: 1px solid var(--border);
+        }}
+
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
+            padding-top: 1rem;
         }}
 
         @keyframes fadeIn {{
@@ -133,6 +147,91 @@ def apply_theme_styles() -> None:
 
         .stCaption, .chat-caption {{
             color: var(--text-muted) !important;
+        }}
+
+        .panel-title {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 1.05rem;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            color: var(--text-main) !important;
+            margin: 0.15rem 0 0.45rem 0;
+        }}
+
+        .app-main-title {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: clamp(1.85rem, 2.6vw, 2.35rem);
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+            color: var(--text-main) !important;
+            margin: 0.1rem 0 0.35rem 0;
+            white-space: nowrap;
+        }}
+
+        .section-kicker {{
+            font-family: 'Manrope', sans-serif !important;
+            color: var(--text-muted) !important;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            margin-bottom: 0.15rem;
+        }}
+
+        .chat-current {{
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface-2);
+            padding: 0.55rem 0.8rem;
+            margin: 0.3rem 0 0.65rem 0;
+            font-family: 'Manrope', sans-serif !important;
+            font-weight: 600;
+            color: var(--text-main) !important;
+        }}
+
+        .control-label {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--text-main) !important;
+            margin-bottom: 0.2rem;
+            text-align: center;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stSelectbox"],
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stNumberInput"] {{
+            width: 100%;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stSelectbox"] > div,
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stNumberInput"] > div {{
+            margin-left: auto;
+            margin-right: auto;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stCheckbox"] {{
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label) [data-testid="stCheckbox"] > label {{
+            margin-left: auto;
+            margin-right: auto;
+        }}
+
+        [data-testid="stHorizontalBlock"] > div:has(.control-label)
+        label[data-baseweb="checkbox"]:has(input[aria-label="Reranking"]) {{
+            width: 100% !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
         }}
 
         .stMarkdown p, .stMarkdown li, [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
@@ -173,6 +272,16 @@ def apply_theme_styles() -> None:
             transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
         }}
 
+        .menu-bar-title {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.85rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted) !important;
+            margin-bottom: 0.55rem;
+        }}
+
         .top-nav-link:hover {{
             border-color: var(--accent);
             background: var(--surface-2);
@@ -185,6 +294,57 @@ def apply_theme_styles() -> None:
             pointer-events: none;
         }}
 
+        .sidebar-title {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.84rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted) !important;
+            margin: 0.2rem 0 0.45rem 0;
+        }}
+
+        .side-nav-link, .side-nav-link:visited {{
+            display: block;
+            width: 100%;
+            text-decoration: none;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface-1);
+            color: var(--text-main) !important;
+            padding: 0.58rem 0.72rem;
+            margin-bottom: 0.42rem;
+            box-shadow: 0 5px 12px var(--shadow);
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.92rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+        }}
+
+        .side-nav-link:hover {{
+            border-color: var(--accent);
+            background: var(--surface-2);
+            transform: translateY(-1px);
+        }}
+
+        .side-nav-link.active {{
+            background: var(--surface-2);
+            cursor: default;
+            pointer-events: none;
+        }}
+
+        .sidebar-foot {{
+            margin-top: 0.75rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted) !important;
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }}
+
         [data-testid="stVerticalBlock"], [data-testid="stVerticalBlockBorderWrapper"] {{
             border-color: var(--border) !important;
         }}
@@ -195,6 +355,34 @@ def apply_theme_styles() -> None:
             background: var(--surface-1);
             box-shadow: 0 8px 20px var(--shadow);
             border-radius: 18px;
+        }}
+
+        [data-testid="stRadio"] > div,
+        [data-testid="stSelectbox"] > div[data-baseweb="select"],
+        [data-testid="stNumberInput"] > div[data-baseweb="input"] {{
+            background: var(--surface-1) !important;
+            border-color: var(--border) !important;
+        }}
+
+        [data-testid="stCheckbox"] {{
+            padding-top: 0.05rem;
+        }}
+
+        label[data-baseweb="checkbox"]:has(input[aria-label="Reranking"]) > div:first-child {{
+            border: 2px solid var(--toggle-border) !important;
+        }}
+
+        label[data-baseweb="checkbox"]:has(input[aria-label="Reranking"]) > div:first-child > div {{
+            border: 1px solid var(--toggle-border) !important;
+        }}
+
+        [data-testid="stRadio"] label p,
+        [data-testid="stSelectbox"] label p,
+        [data-testid="stNumberInput"] label p {{
+            font-family: 'Manrope', sans-serif !important;
+            font-size: 0.88rem !important;
+            font-weight: 700 !important;
+            color: var(--text-main) !important;
         }}
 
         hr, [data-testid="stDivider"] {{
@@ -304,6 +492,10 @@ def apply_theme_styles() -> None:
             }}
             h1 {{
                 font-size: 1.55rem !important;
+            }}
+            .app-main-title {{
+                white-space: normal;
+                font-size: 2rem;
             }}
         }}
         </style>

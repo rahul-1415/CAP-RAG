@@ -1,13 +1,12 @@
 import streamlit as st
 
 from components.navigation import render_top_nav
-from components.theme import apply_theme_styles, init_theme_state, render_dark_mode_slider
+from components.theme import apply_theme_styles, init_theme_state
 
 st.set_page_config(page_title="How It Works", page_icon=":material/schema:", layout="wide")
 
 init_theme_state(default_dark_mode=False)
 apply_theme_styles()
-render_dark_mode_slider()
 render_top_nav(active_page="how_it_works")
 
 st.title("How It Works")
@@ -17,10 +16,12 @@ st.subheader("System Flow")
 st.markdown(
     """
 1. **User asks a question** in the chat interface.
-2. **Retriever searches policy chunks** in Chroma using embedding similarity + MMR, with a user-selected document count.
-3. **Top evidence is assembled** into a context window (char-limited).
-4. **LLM generates response** using only retrieved context.
-5. **Evidence is shown** so users can inspect source snippets.
+2. **Retriever searches candidate chunks** in Chroma using embedding similarity + MMR.
+3. **Cohere reranker reorders candidates** for relevance and keeps top chunks (`k` from UI).
+4. **Post-processing rules clean context** (normalization, deduplication, chunk balancing).
+5. **LLM generates response** using only post-processed context.
+6. **Optional post-LLM refinement** rewrites for clarity without adding facts.
+7. **Evidence + run metrics are shown** and analytics are persisted for monitoring.
 """
 )
 
@@ -29,9 +30,12 @@ st.markdown(
     """
 - **Embedding model**: `BAAI/bge-small-en-v1.5`
 - **Vector DB**: Chroma (persistent local directory)
-- **Retriever mode**: MMR (diversified results)
+- **Retriever mode**: MMR candidate retrieval (diversified results)
+- **Reranker**: Cohere Rerank (`rerank-v3.5` default, optional/fallback-safe)
 - **Retrieval depth control**: `Documents to check` in the UI (`1-20`, default `5`)
+- **Post-processing modes**: `none`, `rules_only`, `rules_plus_llm`
 - **Generation models**: Groq-hosted Llama variants
+- **Analytics**: SQLite run logs + Streamlit Analytics dashboard
 - **UI**: Streamlit chat interface with multi-session history
 """
 )
@@ -42,6 +46,16 @@ st.markdown(
 - Use **3-5 documents** for faster answers on focused questions.
 - Use **6-10 documents** for comparison questions across policies or cities.
 - Use **10+ documents** when you want broader context, with slightly longer response time.
+- Keep **Reranking ON** when using larger document pools for better precision.
+"""
+)
+
+st.subheader("Post-Processing Guidance")
+st.markdown(
+    """
+- **none**: fastest path, useful for quick experimentation.
+- **rules_only**: recommended default for stable quality/latency balance.
+- **rules_plus_llm**: best readability, but higher latency and token usage.
 """
 )
 

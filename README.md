@@ -13,9 +13,12 @@ ClimateActionPolicy-RAG-Application is a project designed to support climate act
 ## Features
 
 - **Streamlit Interface**: Provides an interactive web interface for querying and displaying responses.
-- **Project Pages**: Includes dedicated "About This Project" and "How It Works" pages with workflow and use-case guidance.
+- **Project Pages**: Includes dedicated "About This Project", "How It Works", and "Analytics" pages.
 - **Document Retrieval**: Utilizes a retriever to fetch relevant documents based on user queries.
 - **Retrieval Depth Control**: Lets users choose how many documents to retrieve per query (`1-20`, default `5`).
+- **External Reranking**: Supports Cohere reranking with automatic fallback when unavailable.
+- **Post-processing**: Supports deterministic cleanup/dedup and optional LLM refinement mode.
+- **Persistent Analytics**: Logs run metrics to SQLite and shows model/latency/rerank analytics in-app.
 - **Contextual Response Generation**: Generates responses using Groq-hosted Llama models, enriched with retrieved context.
 - **Chat History Management**: Supports managing multiple chat sessions and maintaining chat histories.
 
@@ -27,9 +30,9 @@ ClimateActionPolicy-RAG-Application is a project designed to support climate act
 ## Folders
 
 - **Chroma**: Directory for the Chroma database used for document retrieval.
-- **components**: Contains the retrieval and generation modules.
-  - **generator.py**: Handles response generation using the Ollama LLaMA 3 model.
-  - **retriever.py**: Manages document retrieval using Chroma and HuggingFace embeddings.
+- **components**: Contains retrieval, reranking, generation, post-processing, analytics, and theming modules.
+- **pages**: Streamlit multipage views (chat docs pages and analytics dashboard).
+- **analytics**: Created at runtime for SQLite metrics storage (`analytics/rag_metrics.sqlite3` by default).
 
 
 ### Running the Application
@@ -72,6 +75,20 @@ How to get a Groq API key:
 
 In the UI you can choose between `llama-3.3-70b-versatile` (default) and `llama-3.1-8b-instant`. If you hit token-per-minute limits, lower the context size, use the 8B instant model, or set `MAX_CONTEXT_CHARS` to a smaller value.
 
+### Configure Advanced RAG Options
+
+Optional environment variables:
+
+- `COHERE_API_KEY` – enables external reranking via Cohere.
+- `RERANK_PROVIDER` – reranker provider name (default: `cohere`).
+- `COHERE_RERANK_MODEL` – default reranker model (default: `rerank-v3.5`).
+- `RERANK_CANDIDATES_MULTIPLIER` – candidate pool multiplier before rerank (default: `4`).
+- `POSTPROCESS_MODE_DEFAULT` – default post-process mode (`none`, `rules_only`, `rules_plus_llm`).
+- `ENABLE_ANALYTICS` – enable/disable SQLite analytics logging (default: `true`).
+- `ANALYTICS_DB_PATH` – SQLite path for analytics (default: `analytics/rag_metrics.sqlite3`).
+
+If `COHERE_API_KEY` is not set, the app keeps working and falls back to base retrieval ordering.
+
 ## Dependencies
 
 The following Python packages are required to run the application:
@@ -85,6 +102,7 @@ The following Python packages are required to run the application:
 - pandas
 - langchain_chroma
 - sentence-transformers
+- cohere
 
 Install the required packages using pip:
 

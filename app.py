@@ -1,19 +1,28 @@
 from pathlib import Path
+from typing import Dict
 from uuid import uuid4
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from components.generator import create_context_from_docs, generate_answer
+from components.analytics_store import AnalyticsStore
 from components.navigation import render_top_nav
+from components.rag_config import (
+    POSTPROCESS_MODES,
+    init_advanced_rag_session_state,
+    load_rag_runtime_config,
+)
+from components.rag_pipeline import run_pipeline
 from components.retriever import initialize_retriever
-from components.theme import apply_theme_styles, init_theme_state, render_dark_mode_slider
+from components.theme import apply_theme_styles, init_theme_state
 
 # Explicitly point to .env file in the project root.
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 st.set_page_config(page_title="Climate Policy RAG", page_icon=":earth_americas:", layout="wide")
+APP_CONFIG = load_rag_runtime_config()
+MODEL_OPTIONS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 
 @st.cache_resource(show_spinner=False)
@@ -21,24 +30,16 @@ def get_retriever():
     return initialize_retriever()
 
 
+@st.cache_resource(show_spinner=False)
+def get_analytics_store(db_path: str, enabled: bool):
+    return AnalyticsStore(Path(db_path), enabled=enabled)
+
+
 def _format_chat_title(text: str, fallback: str = "Untitled chat") -> str:
     cleaned = " ".join(text.split())
     if not cleaned:
         return fallback
     return cleaned[:64] + ("..." if len(cleaned) > 64 else "")
-
-
-def _source_label(metadata, idx):
-    source = (
-        metadata.get("source")
-        or metadata.get("url")
-        or metadata.get("file_path")
-        or "https://www.c40knowledgehub.org/"
-    )
-    page = metadata.get("page")
-    if page is not None:
-        return f"Doc {idx}: {source} (page {page})"
-    return f"Doc {idx}: {source}"
 
 
 def _ordinal_label(number: int) -> str:
@@ -92,7 +93,15 @@ def _create_chat(messages=None, title=None):
             if message.get("role") == "user" and message.get("content", "").strip():
                 resolved_title = _format_chat_title(message["content"], fallback="Untitled chat")
                 break
-    return {"id": uuid4().hex, "title": resolved_title, "messages": messages, "latest_docs": []}
+    return {
+        "id": uuid4().hex,
+        "title": resolved_title,
+        "messages": messages,
+        "latest_docs": [],
+        "latest_notes": [],
+        "latest_metrics": {},
+        "latest_run_id": None,
+    }
 
 
 def _migrate_legacy_state():
@@ -109,10 +118,21 @@ def _migrate_legacy_state():
 
 def _init_session_state():
     if "model_choice" not in st.session_state:
-        st.session_state.model_choice = "llama-3.3-70b-versatile"
+        st.session_state.model_choice = MODEL_OPTIONS[0]
 
     if "retrieval_k" not in st.session_state:
         st.session_state.retrieval_k = 5
+
+    init_advanced_rag_session_state(
+        session_state=st.session_state,
+        config=APP_CONFIG,
+        default_model=st.session_state.model_choice,
+    )
+
+    if st.session_state.postprocess_mode not in POSTPROCESS_MODES:
+        st.session_state.postprocess_mode = APP_CONFIG.postprocess_mode_default
+    if st.session_state.postprocess_model_choice not in MODEL_OPTIONS:
+        st.session_state.postprocess_model_choice = st.session_state.model_choice
 
     if "chats" not in st.session_state:
         chats = _migrate_legacy_state()
@@ -123,6 +143,12 @@ def _init_session_state():
     if "active_chat_id" not in st.session_state:
         st.session_state.active_chat_id = st.session_state.chats[0]["id"]
 
+    for chat in st.session_state.chats:
+        chat.setdefault("latest_docs", [])
+        chat.setdefault("latest_notes", [])
+        chat.setdefault("latest_metrics", {})
+        chat.setdefault("latest_run_id", None)
+
     active_exists = any(chat["id"] == st.session_state.active_chat_id for chat in st.session_state.chats)
     if not active_exists:
         st.session_state.active_chat_id = st.session_state.chats[0]["id"]
@@ -131,6 +157,10 @@ def _init_session_state():
 def _get_active_chat():
     for chat in st.session_state.chats:
         if chat["id"] == st.session_state.active_chat_id:
+            chat.setdefault("latest_docs", [])
+            chat.setdefault("latest_notes", [])
+            chat.setdefault("latest_metrics", {})
+            chat.setdefault("latest_run_id", None)
             return chat
     st.session_state.active_chat_id = st.session_state.chats[0]["id"]
     return st.session_state.chats[0]
@@ -161,54 +191,60 @@ def _render_quick_prompts(chat):
     for idx, suggestion in enumerate(suggestions):
         button_key = f"quick_prompt_{chat['id']}_{idx}"
         if prompt_columns[idx].button(suggestion, key=button_key, use_container_width=True):
-            _process_prompt(suggestion, st.session_state.model_choice)
+            _process_prompt(suggestion)
             st.rerun()
 
 
-def _process_prompt(prompt, model_name):
+def _process_prompt(prompt: str) -> None:
     active_chat = _get_active_chat()
     active_chat["messages"].append({"role": "user", "content": prompt})
 
     try:
-        with st.spinner("Retrieving policy context..."):
-            retriever = get_retriever()
-            selected_k = int(st.session_state.get("retrieval_k", 5))
-            base_search_kwargs = dict(getattr(retriever, "search_kwargs", {}) or {})
-            base_search_kwargs["k"] = selected_k
-            base_search_kwargs["fetch_k"] = max(int(base_search_kwargs.get("fetch_k", 20)), selected_k)
-
-            query_retriever = retriever.vectorstore.as_retriever(
-                search_type=getattr(retriever, "search_type", "mmr"),
-                search_kwargs=base_search_kwargs,
-            )
-            retrieved_docs = query_retriever.invoke(prompt)
+        retriever = get_retriever()
+        analytics_store = get_analytics_store(str(APP_CONFIG.analytics_db_path), APP_CONFIG.enable_analytics)
+        analytics_store.apply_retention(
+            max_days=APP_CONFIG.analytics_retention_days,
+            max_rows=APP_CONFIG.analytics_retention_rows,
+        )
     except Exception as exc:
         active_chat["latest_docs"] = []
+        active_chat["latest_notes"] = [f"Runtime initialization failed: {exc}"]
+        active_chat["latest_metrics"] = {}
         active_chat["messages"].append({"role": "assistant", "content": f"Retriever failed: {exc}"})
         return
 
-    active_chat["latest_docs"] = [
-        {"source": _source_label(doc.metadata or {}, idx), "text": doc.page_content[:800]}
-        for idx, doc in enumerate(retrieved_docs, start=1)
-    ]
-
-    context = create_context_from_docs(retrieved_docs)
-    if not context.strip():
-        answer = (
-            "I could not find relevant policy context for that query. "
-            "Try adding more specific details (policy name, region, or year)."
+    with st.spinner("Running advanced RAG pipeline..."):
+        result = run_pipeline(
+            query=prompt,
+            generation_model=st.session_state.model_choice,
+            retrieval_k=int(st.session_state.retrieval_k),
+            rerank_enabled=bool(st.session_state.rerank_enabled),
+            postprocess_mode=st.session_state.postprocess_mode,
+            postprocess_model=st.session_state.postprocess_model_choice,
+            retriever=retriever,
+            config=APP_CONFIG,
+            analytics_store=analytics_store,
         )
-    else:
-        with st.spinner("Generating response..."):
-            answer = generate_answer(context, prompt, model_name)
 
-    active_chat["messages"].append({"role": "assistant", "content": answer})
+    active_chat["latest_docs"] = result.get("evidence_docs", [])
+    active_chat["latest_notes"] = result.get("warnings", [])
+    active_chat["latest_metrics"] = result.get("timings", {})
+    active_chat["latest_run_id"] = result.get("run_id")
+    active_chat["messages"].append({"role": "assistant", "content": result.get("answer", "")})
+
+
+def _postprocess_label(mode: str) -> str:
+    mapping = {
+        "none": "None",
+        "rules_only": "Rules Only",
+        "rules_plus_llm": "Rules + LLM",
+    }
+    return mapping.get(mode, mode)
 
 
 _init_session_state()
 init_theme_state(default_dark_mode=False)
 apply_theme_styles()
-render_dark_mode_slider()
 render_top_nav(active_page="chat")
 
 col1, col2 = st.columns([1, 2.6], gap="large")
@@ -218,7 +254,7 @@ with col1:
         st.title("Chats")
         st.button("New Chat", on_click=create_new_chat, use_container_width=True, type="primary")
         st.markdown(
-            '<h3 class="chat-caption" style="text-align:center; color:#111; font-weight:bold;">Chat History</h3>',
+            '<div class="panel-title">Chat History</div>',
             unsafe_allow_html=True,
         )
 
@@ -251,34 +287,85 @@ with col1:
 with col2:
     active_chat = _get_active_chat()
 
-    header_col1, header_col2, header_col3 = st.columns([2.1, 1.2, 0.9], gap="medium")
-    with header_col1:
-        st.title("Climate Policy RAG Assistant")
+    with st.container(border=True):
+        st.markdown('<h1 class="app-main-title">Climate Policy RAG Assistant</h1>', unsafe_allow_html=True)
         st.caption("Ask policy questions grounded in the C40 Knowledge Hub dataset.")
-    with header_col2:
-        st.radio(
-            "Model",
-            options=["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-            key="model_choice",
-            horizontal=True,
+
+        controls_col1, controls_col2, controls_col3, controls_col4, controls_col5 = st.columns(
+            [1.35, 1.0, 0.9, 1.2, 1.2], gap="small"
         )
-    with header_col3:
-        st.number_input(
-            "Documents to check",
-            min_value=1,
-            max_value=20,
-            step=1,
-            key="retrieval_k",
-            help="Controls how many policy chunks are retrieved per question.",
-        )
-    st.write(f"**Current chat: {active_chat['title']}**")
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
+        with controls_col1:
+            st.markdown('<div class="control-label">Choose model</div>', unsafe_allow_html=True)
+            st.selectbox(
+                "Choose model",
+                options=MODEL_OPTIONS,
+                key="model_choice",
+                label_visibility="collapsed",
+            )
+        with controls_col2:
+            st.markdown('<div class="control-label">Documents to check</div>', unsafe_allow_html=True)
+            st.number_input(
+                "Documents to check",
+                min_value=1,
+                max_value=20,
+                step=1,
+                key="retrieval_k",
+                label_visibility="collapsed",
+                help="Controls final number of chunks selected for answering.",
+            )
+        with controls_col3:
+            st.markdown('<div class="control-label">Reranking</div>', unsafe_allow_html=True)
+            rerank_pad_left, rerank_toggle_col, rerank_pad_right = st.columns([1, 1, 1], gap="small")
+            with rerank_toggle_col:
+                st.toggle(
+                    "Reranking",
+                    key="rerank_enabled",
+                    label_visibility="collapsed",
+                    help="Use Cohere reranking on retrieved chunks before answer generation.",
+                )
+        with controls_col4:
+            st.markdown('<div class="control-label">Post-processing</div>', unsafe_allow_html=True)
+            st.selectbox(
+                "Post-processing",
+                options=list(POSTPROCESS_MODES),
+                key="postprocess_mode",
+                label_visibility="collapsed",
+                format_func=_postprocess_label,
+            )
+        with controls_col5:
+            st.markdown('<div class="control-label">Post-process LLM</div>', unsafe_allow_html=True)
+            st.selectbox(
+                "Post-process LLM",
+                options=MODEL_OPTIONS,
+                key="postprocess_model_choice",
+                disabled=st.session_state.postprocess_mode != "rules_plus_llm",
+                label_visibility="collapsed",
+                help="Used only when post-processing mode is Rules + LLM.",
+            )
+
+        st.markdown(f'<div class="chat-current">Current chat: {active_chat["title"]}</div>', unsafe_allow_html=True)
+
+    latest_metrics: Dict[str, float] = active_chat.get("latest_metrics", {}) or {}
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     metric_col1.metric("Chats", str(len(st.session_state.chats)))
     metric_col2.metric("Replies", str(_assistant_reply_count(active_chat)))
-    metric_col3.metric("Evidence", str(len(active_chat["latest_docs"])))
+    metric_col3.metric("Evidence", str(len(active_chat.get("latest_docs", []))))
+    metric_col4.metric("Last Latency", f"{int(latest_metrics.get('total_ms', 0))} ms")
 
-    if active_chat["latest_docs"]:
+    if active_chat.get("latest_docs"):
         with st.expander("Retrieved evidence from latest question", expanded=False):
+            if active_chat.get("latest_notes"):
+                for note in active_chat["latest_notes"]:
+                    st.caption(f"Note: {note}")
+
+            if latest_metrics:
+                st.caption(
+                    "Timings (ms): "
+                    f"retrieve={latest_metrics.get('retrieval_ms', 0):.0f}, "
+                    f"rerank={latest_metrics.get('rerank_ms', 0):.0f}, "
+                    f"generate={latest_metrics.get('generation_ms', 0):.0f}, "
+                    f"post={latest_metrics.get('postprocess_ms', 0):.0f}"
+                )
             for doc in active_chat["latest_docs"]:
                 st.caption(doc["source"])
                 st.markdown(doc["text"])
@@ -288,11 +375,7 @@ with col2:
     with chat_container:
         if not active_chat["messages"]:
             st.info("Start a new conversation by asking a climate policy question.")
-            st.markdown(
-                """
-Try prompts like:
-"""
-            )
+            st.markdown("Try prompts like:")
             _render_quick_prompts(active_chat)
         else:
             for message in active_chat["messages"]:
@@ -301,5 +384,5 @@ Try prompts like:
 
     prompt = st.chat_input("Enter your query")
     if prompt:
-        _process_prompt(prompt, st.session_state.model_choice)
+        _process_prompt(prompt)
         st.rerun()

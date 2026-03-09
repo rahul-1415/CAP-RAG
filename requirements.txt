@@ -11,3 +11,4 @@ pandas
 langchain_chroma
 sentence-transformers
 langchain_ollama
+cohere
