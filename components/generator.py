@@ -3,15 +3,20 @@ import os
 from functools import lru_cache
 
 
-def create_context_from_docs(docs):
+def truncate_context(content: str, max_chars: int) -> str:
+    text = content or ""
+    if len(text) > int(max_chars):
+        return text[: int(max_chars)].rstrip()
+    return text
+
+
+def create_context_from_docs(docs, max_chars: int = None):
     """
     Join document content and trim to a reasonable character budget to avoid hitting TPM limits.
     """
-    max_chars = int(os.getenv("MAX_CONTEXT_CHARS", "15000"))
+    limit = int(max_chars or os.getenv("MAX_CONTEXT_CHARS", "15000"))
     content = " ".join([doc.page_content for doc in docs])
-    if len(content) > max_chars:
-        content = content[:max_chars]
-    return content
+    return truncate_context(content, limit)
 
 
 def _get_api_config():
@@ -44,11 +49,21 @@ def generate_answer(context, question, model_name):
     messages = [
         SystemMessage(
             content=(
-                "You are a policy assistant. Answer using only the provided context. "
-                "If the context is insufficient, say exactly what is missing."
+                "You are a climate policy assistant. Answer using only the provided context. "
+                "Cite factual claims with inline document IDs like [DOC_1] or [DOC_2]. "
+                "Cite every bullet or factual paragraph. If the context is insufficient, say exactly what is missing. "
+                "Do not mention any external sources or knowledge."
             )
         ),
-        HumanMessage(content=f"Context: {context}\n\nQuestion: {question}"),
+        HumanMessage(
+            content=(
+                "Context documents:\n"
+                f"{context}\n\n"
+                "User question:\n"
+                f"{question}\n\n"
+                "Return a concise, well-structured answer with inline citations."
+            )
+        ),
     ]
 
     try:

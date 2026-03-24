@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
 from typing import Dict
 from uuid import uuid4
 
 import streamlit as st
+import streamlit.components.v1 as st_components
 from dotenv import load_dotenv
 
 from components.analytics_store import AnalyticsStore
@@ -22,7 +24,7 @@ load_dotenv(dotenv_path=ENV_PATH)
 
 st.set_page_config(page_title="Climate Policy RAG", page_icon=":earth_americas:", layout="wide")
 APP_CONFIG = load_rag_runtime_config()
-MODEL_OPTIONS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+MODEL_OPTIONS = list(APP_CONFIG.model_options)
 
 
 @st.cache_resource(show_spinner=False)
@@ -119,6 +121,8 @@ def _migrate_legacy_state():
 def _init_session_state():
     if "model_choice" not in st.session_state:
         st.session_state.model_choice = MODEL_OPTIONS[0]
+    if st.session_state.model_choice not in MODEL_OPTIONS:
+        st.session_state.model_choice = MODEL_OPTIONS[0]
 
     if "retrieval_k" not in st.session_state:
         st.session_state.retrieval_k = 5
@@ -177,6 +181,15 @@ def _assistant_reply_count(chat):
     return sum(1 for message in chat["messages"] if message.get("role") == "assistant")
 
 
+def _latest_run_message(chat):
+    for message in reversed(chat["messages"]):
+        if message.get("role") == "assistant" and (
+            message.get("run_id") or message.get("evidence_docs") or message.get("timings")
+        ):
+            return message
+    return None
+
+
 def _render_quick_prompts(chat):
     suggestions = [
         "How can a city decarbonise urban freight quickly?",
@@ -197,6 +210,7 @@ def _render_quick_prompts(chat):
 
 def _process_prompt(prompt: str) -> None:
     active_chat = _get_active_chat()
+    history_messages = list(active_chat["messages"])
     active_chat["messages"].append({"role": "user", "content": prompt})
 
     try:
@@ -210,7 +224,16 @@ def _process_prompt(prompt: str) -> None:
         active_chat["latest_docs"] = []
         active_chat["latest_notes"] = [f"Runtime initialization failed: {exc}"]
         active_chat["latest_metrics"] = {}
-        active_chat["messages"].append({"role": "assistant", "content": f"Retriever failed: {exc}"})
+        active_chat["messages"].append(
+            {
+                "role": "assistant",
+                "content": f"Retriever failed: {exc}",
+                "run_id": None,
+                "evidence_docs": [],
+                "warnings": active_chat["latest_notes"],
+                "timings": {},
+            }
+        )
         return
 
     with st.spinner("Running advanced RAG pipeline..."):
@@ -224,13 +247,144 @@ def _process_prompt(prompt: str) -> None:
             retriever=retriever,
             config=APP_CONFIG,
             analytics_store=analytics_store,
+            conversation_messages=history_messages,
         )
 
     active_chat["latest_docs"] = result.get("evidence_docs", [])
     active_chat["latest_notes"] = result.get("warnings", [])
     active_chat["latest_metrics"] = result.get("timings", {})
     active_chat["latest_run_id"] = result.get("run_id")
-    active_chat["messages"].append({"role": "assistant", "content": result.get("answer", "")})
+    active_chat["messages"].append(
+        {
+            "role": "assistant",
+            "content": result.get("answer", ""),
+            "run_id": result.get("run_id"),
+            "evidence_docs": result.get("evidence_docs", []),
+            "warnings": result.get("warnings", []),
+            "timings": result.get("timings", {}),
+        }
+    )
+
+
+def _open_external_url(url: str) -> None:
+    if not url:
+        return
+    safe_url = json.dumps(url)
+    st_components.html(
+        f"<script>window.open({safe_url}, '_blank', 'noopener,noreferrer');</script>",
+        height=0,
+        width=0,
+    )
+
+
+def _log_feedback(run_id: str, feedback_type: str) -> None:
+    if not run_id:
+        return
+    try:
+        analytics_store = get_analytics_store(str(APP_CONFIG.analytics_db_path), APP_CONFIG.enable_analytics)
+        analytics_store.log_feedback(run_id=run_id, feedback_type=feedback_type)
+    except Exception:
+        pass
+
+
+def _log_source_click(run_id: str, doc: Dict[str, str], position: int) -> None:
+    if not run_id:
+        return
+    try:
+        analytics_store = get_analytics_store(str(APP_CONFIG.analytics_db_path), APP_CONFIG.enable_analytics)
+        analytics_store.log_source_click(
+            run_id=run_id,
+            doc_id=doc.get("doc_id"),
+            source=doc.get("source"),
+            title=doc.get("title"),
+            position=position,
+        )
+    except Exception:
+        pass
+
+
+def _render_answer_feedback(run_id: str) -> None:
+    rating_state_key = f"feedback_rating_{run_id}"
+    missing_evidence_key = f"feedback_missing_evidence_{run_id}"
+    rating_submitted = st.session_state.get(rating_state_key)
+    missing_evidence_submitted = bool(st.session_state.get(missing_evidence_key, False))
+
+    feedback_col1, feedback_col2, feedback_col3 = st.columns(3)
+    if feedback_col1.button(
+        "Helpful",
+        key=f"feedback_helpful_{run_id}",
+        use_container_width=True,
+        disabled=rating_submitted is not None,
+    ):
+        _log_feedback(run_id, "helpful")
+        st.session_state[rating_state_key] = "helpful"
+        st.rerun()
+    if feedback_col2.button(
+        "Needs work",
+        key=f"feedback_not_helpful_{run_id}",
+        use_container_width=True,
+        disabled=rating_submitted is not None,
+    ):
+        _log_feedback(run_id, "not_helpful")
+        st.session_state[rating_state_key] = "not_helpful"
+        st.rerun()
+    if feedback_col3.button(
+        "Missing evidence",
+        key=f"feedback_missing_evidence_button_{run_id}",
+        use_container_width=True,
+        disabled=missing_evidence_submitted,
+    ):
+        _log_feedback(run_id, "missing_evidence")
+        st.session_state[missing_evidence_key] = True
+        st.rerun()
+
+    if rating_submitted == "helpful":
+        st.caption("Feedback saved: helpful.")
+    elif rating_submitted == "not_helpful":
+        st.caption("Feedback saved: needs work.")
+    if missing_evidence_submitted:
+        st.caption("Feedback saved: missing evidence flagged.")
+
+
+def _render_message_evidence(message: Dict[str, object]) -> None:
+    evidence_docs = message.get("evidence_docs") or []
+    warnings = message.get("warnings") or []
+    timings = message.get("timings") or {}
+    run_id = message.get("run_id")
+
+    if not evidence_docs and not warnings and not timings and not run_id:
+        return
+
+    with st.expander("Sources and run details", expanded=False):
+        if warnings:
+            for note in warnings:
+                st.caption(f"Note: {note}")
+
+        if timings:
+            st.caption(
+                "Timings (ms): "
+                f"retrieve={timings.get('retrieval_ms', 0):.0f}, "
+                f"rerank={timings.get('rerank_ms', 0):.0f}, "
+                f"generate={timings.get('generation_ms', 0):.0f}, "
+                f"post={timings.get('postprocess_ms', 0):.0f}"
+            )
+
+        if run_id:
+            _render_answer_feedback(run_id)
+
+        for position, doc in enumerate(evidence_docs, start=1):
+            header_col, action_col = st.columns([3.2, 1], gap="small")
+            header_col.markdown(f"**{doc.get('doc_id', f'Doc {position}')}** · {doc.get('title', 'C40 document')}")
+            if action_col.button(
+                "Open source",
+                key=f"open_source_{run_id}_{doc.get('doc_id', position)}",
+                use_container_width=True,
+            ):
+                _log_source_click(run_id, doc, position)
+                _open_external_url(doc.get("source", ""))
+            st.caption(doc.get("source", ""))
+            st.markdown(doc.get("text", ""))
+            st.divider()
 
 
 def _postprocess_label(mode: str) -> str:
@@ -345,11 +499,12 @@ with col2:
 
         st.markdown(f'<div class="chat-current">Current chat: {active_chat["title"]}</div>', unsafe_allow_html=True)
 
-    latest_metrics: Dict[str, float] = active_chat.get("latest_metrics", {}) or {}
+    latest_run = _latest_run_message(active_chat) or {}
+    latest_metrics: Dict[str, float] = active_chat.get("latest_metrics", {}) or latest_run.get("timings", {}) or {}
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     metric_col1.metric("Chats", str(len(st.session_state.chats)))
     metric_col2.metric("Replies", str(_assistant_reply_count(active_chat)))
-    metric_col3.metric("Evidence", str(len(active_chat.get("latest_docs", []))))
+    metric_col3.metric("Evidence", str(len(active_chat.get("latest_docs", []) or latest_run.get("evidence_docs", []))))
     metric_col4.metric("Last Latency", f"{int(latest_metrics.get('total_ms', 0))} ms")
 
     if active_chat.get("latest_docs"):
@@ -381,6 +536,8 @@ with col2:
             for message in active_chat["messages"]:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+                    if message.get("role") == "assistant":
+                        _render_message_evidence(message)
 
     prompt = st.chat_input("Enter your query")
     if prompt:

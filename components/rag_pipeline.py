@@ -5,24 +5,20 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
-from components.generator import create_context_from_docs, generate_answer
-from components.postprocessor import apply_rule_postprocessing, maybe_refine_answer
+from components.conversation import build_generation_question, build_retrieval_query
+from components.generator import generate_answer
+from components.postprocessor import (
+    apply_rule_postprocessing,
+    build_context_from_processed_docs,
+    coerce_docs_to_processed_docs,
+    maybe_refine_answer,
+)
 from components.rag_config import RagRuntimeConfig
 from components.reranker import NoopReranker, build_reranker
 
 
 def _safe_ms(seconds: float) -> float:
     return round(max(0.0, seconds) * 1000.0, 2)
-
-
-def _source_from_metadata(metadata: Dict[str, Any]) -> str:
-    return (
-        metadata.get("source")
-        or metadata.get("url")
-        or metadata.get("file_path")
-        or "https://www.c40knowledgehub.org/"
-    )
-
 
 def run_pipeline(
     query: str,
@@ -35,11 +31,13 @@ def run_pipeline(
     config: RagRuntimeConfig,
     analytics_store: Any = None,
     answer_fn: Callable[[str, str, str], str] = generate_answer,
+    conversation_messages: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     run_id = uuid4().hex
     warnings: List[str] = []
     error_type: Optional[str] = None
     refinement_applied = False
+    conversation_messages = list(conversation_messages or [])
 
     retrieval_ms = 0.0
     rerank_ms = 0.0
@@ -60,17 +58,39 @@ def run_pipeline(
 
     try:
         retrieval_start = time.perf_counter()
-        base_search_kwargs = dict(getattr(retriever, "search_kwargs", {}) or {})
-        base_fetch_k = int(base_search_kwargs.get("fetch_k", 20))
-        candidate_k = max(int(retrieval_k), int(retrieval_k) * int(config.rerank_candidates_multiplier))
-        base_search_kwargs["k"] = candidate_k
-        base_search_kwargs["fetch_k"] = max(base_fetch_k, candidate_k)
-
-        query_retriever = retriever.vectorstore.as_retriever(
-            search_type=getattr(retriever, "search_type", "mmr"),
-            search_kwargs=base_search_kwargs,
+        retrieval_query = build_retrieval_query(
+            question=query,
+            messages=conversation_messages,
+            max_turns=config.conversation_history_turns,
         )
-        retrieved_docs = query_retriever.invoke(query)
+        generation_question = build_generation_question(
+            question=query,
+            messages=conversation_messages,
+            max_turns=config.conversation_history_turns,
+        )
+        if retrieval_query.strip() != (query or "").strip():
+            warnings.append("Resolved the latest question using recent chat context.")
+
+        if hasattr(retriever, "retrieve"):
+            retrieved_docs = retriever.retrieve(
+                query=retrieval_query,
+                retrieval_k=int(retrieval_k),
+                rerank_enabled=bool(rerank_enabled),
+                candidate_multiplier=int(config.rerank_candidates_multiplier),
+            )
+        else:
+            base_search_kwargs = dict(getattr(retriever, "search_kwargs", {}) or {})
+            base_fetch_k = int(base_search_kwargs.get("fetch_k", 20))
+            candidate_k = int(retrieval_k)
+            if rerank_enabled:
+                candidate_k = max(int(retrieval_k), int(retrieval_k) * int(config.rerank_candidates_multiplier))
+            base_search_kwargs["k"] = candidate_k
+            base_search_kwargs["fetch_k"] = max(base_fetch_k, candidate_k)
+            query_retriever = retriever.vectorstore.as_retriever(
+                search_type=getattr(retriever, "search_type", "mmr"),
+                search_kwargs=base_search_kwargs,
+            )
+            retrieved_docs = query_retriever.invoke(retrieval_query)
         retrieval_ms = _safe_ms(time.perf_counter() - retrieval_start)
 
         rerank_start = time.perf_counter()
@@ -114,14 +134,11 @@ def run_pipeline(
         if mode not in {"none", "rules_only", "rules_plus_llm"}:
             mode = "rules_only"
 
-        processed_docs_output = None
         if mode == "none":
-            selected_docs = selected_docs[: int(retrieval_k)]
-            context = create_context_from_docs(selected_docs)
-            for idx, doc in enumerate(selected_docs, start=1):
-                metadata = dict(getattr(doc, "metadata", {}) or {})
-                source = _source_from_metadata(metadata)
-                evidence_docs.append({"source": f"Doc {idx}: {source}", "text": getattr(doc, "page_content", "")[:900]})
+            processed_docs = coerce_docs_to_processed_docs(
+                docs=selected_docs[: int(retrieval_k)],
+                max_doc_chars=config.postprocess_max_doc_chars,
+            )
         else:
             processed_docs_output = apply_rule_postprocessing(
                 docs=selected_docs,
@@ -130,14 +147,24 @@ def run_pipeline(
                 max_docs=config.postprocess_max_docs,
             )
             warnings.extend(processed_docs_output.notes)
-            context = processed_docs_output.context
-            for idx, item in enumerate(processed_docs_output.docs, start=1):
-                evidence_docs.append(
-                    {
-                        "source": f"Doc {idx}: {item.source}",
-                        "text": item.text[:900],
-                    }
-                )
+            processed_docs = processed_docs_output.docs
+
+        context, was_context_trimmed = build_context_from_processed_docs(
+            processed_docs,
+            max_context_chars=config.max_context_chars,
+        )
+        if was_context_trimmed:
+            warnings.append(f"Context was trimmed to {config.max_context_chars} characters before generation.")
+
+        for item in processed_docs:
+            evidence_docs.append(
+                {
+                    "doc_id": item.doc_id,
+                    "title": item.title,
+                    "source": item.source,
+                    "text": item.text[:900],
+                }
+            )
         postprocess_ms = _safe_ms(time.perf_counter() - postprocess_start)
 
         generation_start = time.perf_counter()
@@ -147,11 +174,11 @@ def run_pipeline(
                 "Try adding more specific details (policy name, region, or year)."
             )
         else:
-            answer = answer_fn(context, query, generation_model)
+            answer = answer_fn(context, generation_question, generation_model)
             if mode in {"rules_only", "rules_plus_llm"}:
                 answer, refine_warning, refinement_applied = maybe_refine_answer(
                     answer=answer,
-                    question=query,
+                    question=generation_question,
                     context=context,
                     mode=mode,
                     refine_model=postprocess_model or generation_model,

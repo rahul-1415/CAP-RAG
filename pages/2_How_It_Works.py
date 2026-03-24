@@ -1,6 +1,7 @@
 import streamlit as st
 
 from components.navigation import render_top_nav
+from components.rag_config import load_rag_runtime_config
 from components.theme import apply_theme_styles, init_theme_state
 
 st.set_page_config(page_title="How It Works", page_icon=":material/schema:", layout="wide")
@@ -8,6 +9,7 @@ st.set_page_config(page_title="How It Works", page_icon=":material/schema:", lay
 init_theme_state(default_dark_mode=False)
 apply_theme_styles()
 render_top_nav(active_page="how_it_works")
+config = load_rag_runtime_config()
 
 st.title("How It Works")
 st.caption("From user query to policy-grounded answer.")
@@ -16,26 +18,28 @@ st.subheader("System Flow")
 st.markdown(
     """
 1. **User asks a question** in the chat interface.
-2. **Retriever searches candidate chunks** in Chroma using embedding similarity + MMR.
-3. **Cohere reranker reorders candidates** for relevance and keeps top chunks (`k` from UI).
-4. **Post-processing rules clean context** (normalization, deduplication, chunk balancing).
-5. **LLM generates response** using only post-processed context.
-6. **Optional post-LLM refinement** rewrites for clarity without adding facts.
-7. **Evidence + run metrics are shown** and analytics are persisted for monitoring.
+2. **Conversation-aware query rewriting** expands short follow-ups with recent user turns when needed.
+3. **Hybrid retrieval searches candidate chunks** using dense similarity plus lexical BM25-style scoring.
+4. **Cohere reranker optionally reorders candidates** for relevance and keeps top chunks (`k` from UI).
+5. **Post-processing rules clean context** (normalization, deduplication, chunk balancing).
+6. **LLM generates a cited response** using only post-processed context and inline `[DOC_n]` references.
+7. **Optional post-LLM refinement** rewrites for clarity without adding facts or removing citations.
+8. **Evidence + run metrics are shown per answer** and analytics are persisted for monitoring.
 """
 )
 
 st.subheader("Technical Components")
 st.markdown(
-    """
+    f"""
 - **Embedding model**: `BAAI/bge-small-en-v1.5`
 - **Vector DB**: Chroma (persistent local directory)
 - **Retriever mode**: MMR candidate retrieval (diversified results)
+- **Hybrid retrieval**: Dense ranking fused with lexical scoring over the indexed corpus
 - **Reranker**: Cohere Rerank (`rerank-v3.5` default, optional/fallback-safe)
 - **Retrieval depth control**: `Documents to check` in the UI (`1-20`, default `5`)
 - **Post-processing modes**: `none`, `rules_only`, `rules_plus_llm`
-- **Generation models**: Groq-hosted Llama variants
-- **Analytics**: SQLite run logs + Streamlit Analytics dashboard
+- **Generation models**: `{", ".join(config.model_options)}`
+- **Analytics**: SQLite run logs + Streamlit Analytics dashboard + answer feedback/source-open events
 - **UI**: Streamlit chat interface with multi-session history
 """
 )
@@ -56,6 +60,7 @@ st.markdown(
 - **none**: fastest path, useful for quick experimentation.
 - **rules_only**: recommended default for stable quality/latency balance.
 - **rules_plus_llm**: best readability, but higher latency and token usage.
+- All answer modes now aim to preserve inline `[DOC_n]` citations back to the retrieved evidence.
 """
 )
 
@@ -75,7 +80,7 @@ with tab1:
 **Goal**: Identify actions to reduce building emissions in cities.  
 **Example prompt**: "What building retrofit policies are most commonly recommended in C40 case studies?"  
 **Suggested documents to check**: `8`  
-**What the app returns**: A summarized set of retrofit approaches grounded in retrieved policy documents.
+**What the app returns**: A summarized set of retrofit approaches grounded in retrieved policy documents, with citations and expandable evidence.
 """
     )
 
@@ -105,7 +110,7 @@ with tab4:
 **Goal**: Compare policy patterns across themes.  
 **Example prompt**: "Compare adaptation vs mitigation policy recommendations in the dataset."  
 **Suggested documents to check**: `12`  
-**What the app returns**: A structured comparison based on retrieved passages, not generic model knowledge.
+**What the app returns**: A structured comparison based on retrieved passages, not generic model knowledge, plus source panels for each answer.
 """
     )
 

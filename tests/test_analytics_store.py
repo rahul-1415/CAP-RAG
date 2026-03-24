@@ -56,6 +56,23 @@ class TestAnalyticsStore(unittest.TestCase):
             self.assertEqual(len(docs), 1)
             self.assertEqual(docs.iloc[0]["run_id"], "run_1")
 
+            store.log_feedback(run_id="run_1", feedback_type="helpful")
+            store.log_source_click(
+                run_id="run_1",
+                doc_id="DOC_1",
+                source="https://www.c40knowledgehub.org/",
+                title="C40 Knowledge Hub document",
+                position=1,
+            )
+
+            feedback_rows = store.read_feedback_rows(["run_1"])
+            self.assertEqual(len(feedback_rows), 1)
+            self.assertEqual(feedback_rows.iloc[0]["feedback_type"], "helpful")
+
+            source_click_rows = store.read_source_click_rows(["run_1"])
+            self.assertEqual(len(source_click_rows), 1)
+            self.assertEqual(source_click_rows.iloc[0]["doc_id"], "DOC_1")
+
 
 if __name__ == "__main__":
     unittest.main()

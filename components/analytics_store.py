@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -66,9 +67,37 @@ class AnalyticsStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS run_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    feedback_type TEXT NOT NULL,
+                    note TEXT,
+                    FOREIGN KEY(run_id) REFERENCES query_runs(run_id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS source_clicks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    ts TEXT NOT NULL,
+                    doc_id TEXT,
+                    source TEXT,
+                    title TEXT,
+                    position INTEGER,
+                    FOREIGN KEY(run_id) REFERENCES query_runs(run_id) ON DELETE CASCADE
+                )
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_query_runs_ts ON query_runs(ts);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_query_runs_model ON query_runs(generation_model);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_docs_run_id ON retrieval_docs(run_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_feedback_run_id ON run_feedback(run_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_clicks_run_id ON source_clicks(run_id);")
 
     def log_run(self, run_payload: Dict[str, Any], doc_payloads: Sequence[Dict[str, Any]]) -> None:
         if not self.enabled:
@@ -186,6 +215,75 @@ class AnalyticsStore:
         query = (
             "SELECT run_id, rank_before, rank_after, source, score_raw, score_rerank, selected "
             f"FROM retrieval_docs WHERE run_id IN ({placeholders})"
+        )
+        with self._connect() as conn:
+            return pd.read_sql_query(query, conn, params=run_ids)
+
+    def log_feedback(self, run_id: str, feedback_type: str, note: Optional[str] = None) -> None:
+        if not self.enabled or not run_id or not feedback_type:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_feedback (run_id, ts, feedback_type, note)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    feedback_type,
+                    note,
+                ),
+            )
+
+    def log_source_click(
+        self,
+        run_id: str,
+        doc_id: Optional[str],
+        source: Optional[str],
+        title: Optional[str],
+        position: Optional[int],
+    ) -> None:
+        if not self.enabled or not run_id:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_clicks (run_id, ts, doc_id, source, title, position)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    doc_id,
+                    source,
+                    title,
+                    position,
+                ),
+            )
+
+    def read_feedback_rows(self, run_ids: Iterable[str]) -> pd.DataFrame:
+        run_ids = [run_id for run_id in run_ids if run_id]
+        if not self.enabled or not self.db_path.exists() or not run_ids:
+            return pd.DataFrame()
+
+        placeholders = ",".join(["?"] * len(run_ids))
+        query = (
+            "SELECT run_id, ts, feedback_type, note "
+            f"FROM run_feedback WHERE run_id IN ({placeholders}) ORDER BY ts DESC"
+        )
+        with self._connect() as conn:
+            return pd.read_sql_query(query, conn, params=run_ids)
+
+    def read_source_click_rows(self, run_ids: Iterable[str]) -> pd.DataFrame:
+        run_ids = [run_id for run_id in run_ids if run_id]
+        if not self.enabled or not self.db_path.exists() or not run_ids:
+            return pd.DataFrame()
+
+        placeholders = ",".join(["?"] * len(run_ids))
+        query = (
+            "SELECT run_id, ts, doc_id, source, title, position "
+            f"FROM source_clicks WHERE run_id IN ({placeholders}) ORDER BY ts DESC"
         )
         with self._connect() as conn:
             return pd.read_sql_query(query, conn, params=run_ids)

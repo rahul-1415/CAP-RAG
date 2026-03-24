@@ -63,6 +63,9 @@ filtered_runs["success"] = pd.to_numeric(filtered_runs["success"], errors="coerc
 for metric_col in ["total_ms", "retrieval_ms", "rerank_ms", "generation_ms", "postprocess_ms"]:
     filtered_runs[metric_col] = pd.to_numeric(filtered_runs[metric_col], errors="coerce")
 
+feedback_rows = store.read_feedback_rows(filtered_runs["run_id"].tolist())
+source_click_rows = store.read_source_click_rows(filtered_runs["run_id"].tolist())
+
 overview_col1, overview_col2, overview_col3, overview_col4 = st.columns(4)
 total_queries = int(len(filtered_runs))
 success_rate = float(filtered_runs["success"].mean() * 100.0)
@@ -73,6 +76,21 @@ overview_col1.metric("Queries", str(total_queries))
 overview_col2.metric("Success Rate", f"{success_rate:.1f}%")
 overview_col3.metric("P50 Latency", f"{p50_total:.0f} ms")
 overview_col4.metric("P95 Latency", f"{p95_total:.0f} ms")
+
+quality_col1, quality_col2, quality_col3, quality_col4 = st.columns(4)
+if feedback_rows.empty:
+    helpful_count = 0
+    needs_work_count = 0
+    missing_evidence_count = 0
+else:
+    helpful_count = int((feedback_rows["feedback_type"] == "helpful").sum())
+    needs_work_count = int((feedback_rows["feedback_type"] == "not_helpful").sum())
+    missing_evidence_count = int((feedback_rows["feedback_type"] == "missing_evidence").sum())
+
+quality_col1.metric("Helpful Votes", str(helpful_count))
+quality_col2.metric("Needs Work Votes", str(needs_work_count))
+quality_col3.metric("Missing Evidence Flags", str(missing_evidence_count))
+quality_col4.metric("Source Opens", str(len(source_click_rows)))
 
 trend_col1, trend_col2 = st.columns([1.4, 1.0], gap="large")
 with trend_col1:
@@ -159,6 +177,32 @@ with impact_col2:
     avg_chars = pd.to_numeric(filtered_runs["response_chars"], errors="coerce").mean()
     st.metric("LLM Refinement Usage", f"{refinement_rate:.1f}%")
     st.metric("Avg Response Length", f"{0 if pd.isna(avg_chars) else int(avg_chars)} chars")
+
+feedback_col1, feedback_col2 = st.columns(2, gap="large")
+with feedback_col1:
+    st.subheader("Answer Feedback")
+    if feedback_rows.empty:
+        st.info("No answer feedback has been submitted yet.")
+    else:
+        feedback_summary = (
+            feedback_rows.groupby("feedback_type", as_index=False)
+            .agg(events=("feedback_type", "count"))
+            .sort_values("events", ascending=False)
+        )
+        st.dataframe(feedback_summary, use_container_width=True, hide_index=True)
+
+with feedback_col2:
+    st.subheader("Top Opened Sources")
+    if source_click_rows.empty:
+        st.info("No source opens have been recorded yet.")
+    else:
+        source_summary = (
+            source_click_rows.groupby(["title", "source"], as_index=False)
+            .agg(opens=("run_id", "count"))
+            .sort_values("opens", ascending=False)
+            .head(10)
+        )
+        st.dataframe(source_summary, use_container_width=True, hide_index=True)
 
 st.subheader("Recent Runs")
 recent_cols = [

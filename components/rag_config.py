@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 POSTPROCESS_MODES = ("none", "rules_only", "rules_plus_llm")
+DEFAULT_MODEL_OPTIONS = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant")
 
 
 def _parse_bool(value: str, default: bool) -> bool:
@@ -42,6 +43,9 @@ class RagRuntimeConfig:
     postprocess_dedup_threshold: float
     postprocess_max_doc_chars: int
     postprocess_max_docs: int
+    max_context_chars: int = 15000
+    conversation_history_turns: int = 4
+    model_options: tuple = DEFAULT_MODEL_OPTIONS
 
 
 def load_rag_runtime_config() -> RagRuntimeConfig:
@@ -59,6 +63,13 @@ def load_rag_runtime_config() -> RagRuntimeConfig:
     except (TypeError, ValueError):
         dedup_threshold = 0.92
     dedup_threshold = max(0.5, min(0.999, dedup_threshold))
+
+    raw_models = os.getenv("GENERATION_MODEL_OPTIONS")
+    if raw_models:
+        parsed_models = tuple(model.strip() for model in raw_models.split(",") if model.strip())
+        model_options = parsed_models or DEFAULT_MODEL_OPTIONS
+    else:
+        model_options = DEFAULT_MODEL_OPTIONS
 
     return RagRuntimeConfig(
         rerank_provider=rerank_provider,
@@ -82,6 +93,11 @@ def load_rag_runtime_config() -> RagRuntimeConfig:
         postprocess_max_docs=_parse_int(
             os.getenv("POSTPROCESS_MAX_DOCS"), default=20, minimum=1, maximum=50
         ),
+        max_context_chars=_parse_int(os.getenv("MAX_CONTEXT_CHARS"), default=15000, minimum=1000, maximum=100000),
+        conversation_history_turns=_parse_int(
+            os.getenv("CONVERSATION_HISTORY_TURNS"), default=4, minimum=1, maximum=8
+        ),
+        model_options=model_options,
     )
 
 

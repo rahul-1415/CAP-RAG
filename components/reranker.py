@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from components.document_utils import metadata_source
+
 
 @dataclass
 class RerankDocRecord:
@@ -25,12 +27,7 @@ class RerankOutput:
 
 def _doc_source(doc: Any) -> str:
     metadata = getattr(doc, "metadata", {}) or {}
-    return (
-        metadata.get("source")
-        or metadata.get("url")
-        or metadata.get("file_path")
-        or "https://www.c40knowledgehub.org/"
-    )
+    return metadata_source(metadata)
 
 
 class BaseReranker(ABC):
