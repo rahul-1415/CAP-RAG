@@ -5,14 +5,22 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-import chromadb
-from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
 from components.document_utils import document_key
+
+CHROMA_IMPORT_ERROR: Optional[Exception] = None
+
+try:
+    import chromadb
+    from langchain_chroma import Chroma
+except Exception as exc:  # pragma: no cover - exercised in deployment resolution failures.
+    chromadb = None  # type: ignore[assignment]
+    Chroma = Any  # type: ignore[assignment,misc]
+    CHROMA_IMPORT_ERROR = exc
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_DIR = BASE_DIR / "Chroma" / "env_policy"
@@ -141,7 +149,17 @@ def _fuse_ranked_lists(ranked_lists: Iterable[Sequence[Document]], limit: int) -
     return [doc_lookup[key] for key in ordered_keys[:limit]]
 
 
+def _require_chroma_dependencies() -> None:
+    if CHROMA_IMPORT_ERROR is None:
+        return
+    raise RuntimeError(
+        "Chroma dependencies failed to import. This deployment likely resolved incompatible "
+        "`chromadb` or `protobuf` packages. Rebuild with the pinned versions from requirements.txt."
+    ) from CHROMA_IMPORT_ERROR
+
+
 def _build_client_settings():
+    _require_chroma_dependencies()
     return chromadb.config.Settings(
         is_persistent=True,
         persist_directory=str(DB_DIR),
@@ -150,17 +168,24 @@ def _build_client_settings():
 
 
 @lru_cache(maxsize=1)
+def _get_chroma_client():
+    return chromadb.Client(settings=_build_client_settings())
+
+
+@lru_cache(maxsize=1)
 def get_collection_stats() -> CollectionStats:
+    _require_chroma_dependencies()
     if not DB_DIR.exists():
         return CollectionStats(collection_name=COLLECTION_NAME, document_count=0)
 
-    client = chromadb.PersistentClient(path=str(DB_DIR))
+    client = _get_chroma_client()
     collection = client.get_collection(COLLECTION_NAME)
     return CollectionStats(collection_name=COLLECTION_NAME, document_count=collection.count())
 
 
 def _load_collection_documents() -> List[Document]:
-    client = chromadb.PersistentClient(path=str(DB_DIR))
+    _require_chroma_dependencies()
+    client = _get_chroma_client()
     collection = client.get_collection(COLLECTION_NAME)
     payload = collection.get(include=["documents", "metadatas"])
 
@@ -174,12 +199,11 @@ def _load_collection_documents() -> List[Document]:
 
 
 def initialize_retriever():
+    _require_chroma_dependencies()
     if not DB_DIR.exists():
         raise FileNotFoundError(
             f"Chroma DB directory not found at {DB_DIR}. Ensure the vector DB is available in deployment."
         )
-
-    client_settings = _build_client_settings()
 
     # Normalized vectors generally improve cosine similarity retrieval stability.
     embedder = HuggingFaceEmbeddings(
@@ -189,7 +213,7 @@ def initialize_retriever():
 
     bge_vectorstore = Chroma(
         embedding_function=embedder,
-        client_settings=client_settings,
+        client=_get_chroma_client(),
         collection_name=COLLECTION_NAME,
         collection_metadata={"hnsw:space": "cosine"},
     )
